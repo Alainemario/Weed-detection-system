@@ -1,0 +1,38 @@
+# YOLOv8-ResNet50 Custom Architecture for Weed Detection
+nc: 2  # Set this to your class count (e.g., 2: 'crop', 'weed')
+
+# Backbone
+backbone:
+  # [from, repeats, module, args]
+  # args: [input_channels, model_name, weights, unwrap, layer_trim, features_only]
+  # We request "features_only=True" to get access to intermediate layers (P3, P4, P5)
+  - [-1, 1, TorchVision, [3, "resnet50", "DEFAULT", True, 2, True]] 
+  
+  # We must route the output features. 
+  # ResNet50 (timm/torchvision) usually returns features at indices [1, 2, 3, 4]
+  # We need indices 2 (P3), 3 (P4), and 4 (P5).
+  - [-1, 1, SPPF, [2048, 5]]  # Process the last layer (P5) with SPP
+
+# Head (Standard YOLOv8 Head wired to ResNet)
+head:
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  # Route to ResNet P4 (Usually 1024 channels). 
+  # Note: You might need to adjust the index '4' below depending on the exact ResNet version returns
+  - [[-1, 4], 1, Concat, [1]] 
+  - [-1, 3, C2f, [512]] 
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  # Route to ResNet P3 (Usually 512 channels)
+  - [[-1, 3], 1, Concat, [1]] 
+  - [-1, 3, C2f, [256]] 
+
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 8], 1, Concat, [1]] # Cat with P4 path
+  - [-1, 3, C2f, [512]] 
+
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 5], 1, Concat, [1]] # Cat with P5 path
+  - [-1, 3, C2f, [1024]] 
+
+  # Detect head
+  - [[15, 18, 21], 1, Detect, [nc]]
